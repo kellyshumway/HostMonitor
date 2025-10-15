@@ -1,0 +1,48 @@
+.PHONY: build test run docker-build docker-run clean
+
+APP_NAME = host_monitor
+GO_FILES = $(APP_NAME).go
+
+# Default values for command flags (used in local 'run')
+HOSTS ?= actiontarget.com, ksl.com, github.com
+PORT ?= 8080
+INTERVAL ?= 5000
+
+# Compile the service monitor application
+build:
+	@echo "Building Host Monitor executable..."
+	go build -o $(APP_NAME) $(GO_FILES)
+
+# Run the compiled application locally
+run: build
+	@echo "Running $(APP_NAME) on port $(PORT)..."
+	./$(APP_NAME) -hosts $(HOSTS) -port $(PORT) -interval $(INTERVAL)
+
+# Build the Docker image
+docker-build:
+	@echo "Building Docker image..."
+	docker build -t $(APP_NAME) .
+
+# Run the Docker container
+# -p maps the internal port to the host port (8080:8080)
+# --rm automatically cleans up the container on exit
+# -d runs in detached mode (use -it to run in foreground)
+docker-run: docker-build
+	@echo "Running Docker container..."
+	docker run --rm -d -p 8080:8080 --name $(APP_NAME)-container $(APP_NAME)
+
+# Stop and remove the Docker container
+docker-stop:
+	@echo "Stopping Docker container..."
+	-docker stop $(APP_NAME)-container || true
+
+# Placeholder for testing (replace with actual unit tests)
+test:
+	@echo "Running tests..."
+	go test ./...
+
+# Clean up executable and docker container
+clean: docker-stop
+	@echo "Cleaning up..."
+	-rm -f $(APP_NAME) || true
+	-docker rmi $(APP_NAME) || true
