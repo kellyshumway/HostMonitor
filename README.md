@@ -13,10 +13,10 @@ Prerequsites:
 Instructions to run from windows:
 	from powershell (in the directory with the files):
 		> docker run --rm -it -v "$($pwd):/app" -w /app -p 8080:8080 golang:1.21-alpine /bin/sh
-			this will start the docker container sharing resources for the applicatino and connect to the linux terminal
+			starts the docker container sharing resources for the applicatino and connect to the linux terminal
 		
 		# apk add make    
-			install make into the linux environment
+			installs make into the linux environment
 	
 	You will now have a functional linux environment to run the program from windows.
 
