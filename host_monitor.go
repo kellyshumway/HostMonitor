@@ -16,12 +16,12 @@ import (
 
 // HostStatus holds the real-time metrics for a single host.
 type HostStatus struct {
-	Host        string  `json:"host"`
-	Status      string  `json:"status"` // "UP" or "DOWN"
-	LatencyMs   float64 `json:"latencyMs"`
-	PacketLoss  float64 `json:"packetLoss"` // Percentage
-	LastCheck   time.Time `json:"lastCheck"`
-	CheckCount  int     `json:"checkCount"`
+	Host       string    `json:"host"`
+	Status     string    `json:"status"` // "UP" or "DOWN"
+	LatencyMs  float64   `json:"latencyMs"`
+	PacketLoss float64   `json:"packetLoss"` // Percentage
+	LastCheck  time.Time `json:"lastCheck"`
+	CheckCount int       `json:"checkCount"`
 }
 
 // Global state protected by a RWMutex
@@ -52,9 +52,9 @@ func monitorHost(host string, interval time.Duration) {
 
 	mu.Lock()
 	hostStatuses[host] = HostStatus{
-		Host: host,
-		Status: "INIT",
-		LatencyMs: 0,
+		Host:       host,
+		Status:     "INIT",
+		LatencyMs:  0,
 		PacketLoss: 0,
 		// LastCheck defaults to zero time (0001-01-01T00:00:00Z)
 	}
@@ -62,33 +62,58 @@ func monitorHost(host string, interval time.Duration) {
 
 	log.Printf("Starting monitoring for host: %s at %v intervals", host, interval)
 
+	// Define a custom HTTP client with a timeout for the check
+	client := http.Client{
+		// Set a connection timeout to prevent checks from hanging indefinitely
+		Timeout: 5 * time.Second,
+	}
+
 	for range ticker.C {
-		// --- Ping Simulation Start ---
 		var status string
-		var latency float64
-		var packetLoss float64
+		var latency float64 = 0.0
+		var packetLoss float64 = 0.0 // Always 0% for a single HTTP check
 
-		// Seed the random number generator for realistic (simulated) data (Moved seed to main)
-		r := rand.Float64()
-
-		if r < 0.05 { // 5% chance of being down
-			status = "DOWN"
-			latency = 0.0
-			packetLoss = 100.0
-		} else {
-			status = "UP"
-			// Simulate realistic latency (50ms to 250ms)
-			latency = 50.0 + rand.Float64()*200.0
-			// Simulate low packet loss (0% to 5%)
-			packetLoss = rand.Float64() * 5.0
+		// Prepend scheme if missing for http.Client to work
+		url := host
+		if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+			url = "http://" + host // Default to HTTP for simplicity
 		}
-		// --- Ping Simulation End ---
+
+		startTime := time.Now()
+
+		// Use a HEAD request, which is lighter than GET as it only requests headers
+		req, err := http.NewRequest("HEAD", url, nil)
+		if err != nil {
+			log.Printf("Error creating request for %s: %v", host, err)
+			status = "DOWN"
+		} else {
+			resp, err := client.Do(req)
+
+			if err != nil {
+				// Connection refused, timeout, or DNS error
+				status = "DOWN"
+				log.Printf("Host %s DOWN (Error: %v)", host, err)
+			} else {
+				defer resp.Body.Close()
+
+				// Calculate actual latency
+				latency = float64(time.Since(startTime).Microseconds()) / 1000.0 // Convert to milliseconds
+
+				// A 2xx status code is generally considered UP
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+					status = "UP"
+				} else {
+					status = "DOWN" // Treat non-2xx as a service failure
+					log.Printf("Host %s DOWN (Status: %d)", host, resp.StatusCode)
+				}
+			}
+		}
 
 		mu.Lock()
 		currentStatus := hostStatuses[host]
 		currentStatus.Status = status
 		// Use float64 for type conversion
-		currentStatus.LatencyMs = float64(int(latency*100)) / 100.0 // Round to 2 decimals
+		currentStatus.LatencyMs = float64(int(latency*100)) / 100.0   // Round to 2 decimals
 		currentStatus.PacketLoss = float64(int(packetLoss*10)) / 10.0 // Round to 1 decimal
 		currentStatus.LastCheck = time.Now()
 		currentStatus.CheckCount++
@@ -107,7 +132,7 @@ func sseHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get a channel to detect when the client closes the connection
 	ctx := r.Context()
-	
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
@@ -125,7 +150,6 @@ func sseHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
 	}
-
 
 	// Loop to send updates every 500ms
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -178,8 +202,8 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	// Parse the flags here, after defining them in init()
-	flag.Parse() 
-	
+	flag.Parse()
+
 	rand.Seed(time.Now().UnixNano()) // Seed random for simulation
 
 	log.Println("Starting Service Monitoring Service...")
@@ -191,7 +215,7 @@ func main() {
 	if len(hosts) == 0 || (len(hosts) == 1 && hosts[0] == "") {
 		log.Fatal("No hosts specified. Please use the -hosts flag.")
 	}
-	
+
 	filteredHosts := make([]string, 0)
 	for _, host := range hosts {
 		host = strings.TrimSpace(host)
@@ -210,7 +234,7 @@ func main() {
 	log.Printf("Web Dashboard available at http://localhost%s", addr)
 	// Log the confirmed settings
 	log.Printf("Monitoring %d hosts (Interval: %dms, Port: %d)", len(filteredHosts), intervalMs, port)
-	
+
 	err := http.ListenAndServe(addr, nil)
 	if err != nil {
 		log.Fatalf("Failed to start server: %v", err)
